@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>City Simulator</title>
+    <style>
+        :root {
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            color: white;
+        }
+
+        #app {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 12px;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 300px;
+            pointer-events: none;
+            /* Let clicks pass through to canvas for parts not covered */
+        }
+
+        #ui-layer>* {
+            pointer-events: auto;
+            /* Re-enable for buttons/sliders */
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #efefef;
+        }
+
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+
+        button:hover {
+            background-color: #2563eb;
+        }
+
+        .legend {
+            margin-top: 15px;
+            font-size: 0.85rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .highway {
+            background: #4b5563;
+        }
+
+        .highway::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background: #fcd34d;
+        }
+
+        .street {
+            background: #9ca3af;
+        }
+
+        .street::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background: #e5e7eb;
+        }
+
+        .house {
+            background: #ef4444;
+        }
+
+        .house::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 10px;
+            background: #b91c1c;
+            /* Roof */
+            border-radius: 4px 4px 0 0;
+        }
+
+        .grass {
+            background: #10b981;
+        }
+
+        .car {
+            background: #3b82f6;
+            border-radius: 2px;
+            height: 16px;
+            margin-top: 4px;
+        }
+
+        .car::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            right: 2px;
+            height: 5px;
+            background: #bfdbfe;
+        }
+
+        .light {
+            background: #000;
+            border-radius: 50%;
+        }
+
+        .light::before {
+            content: '';
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            width: 5px;
+            height: 5px;
+            background: #f00;
+            border-radius: 50%;
+        }
+
+        .light::after {
+            content: '';
+            position: absolute;
+            bottom: 6px;
+            right: 6px;
+            width: 5px;
+            height: 5px;
+            background: #0f0;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <canvas id="city-canvas"></canvas>
+        <div id="ui-layer">
+            <h1>City Simulator</h1>
+            <div style="margin-bottom: 10px;">
+                <button id="regen-btn">Regenerate City</button>
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="font-size: 0.9rem; display: block; margin-bottom: 5px;">Light Frequency: <span
+                        id="light-label">2.0s</span></label>
+                <input type="range" id="light-slider" min="500" max="5000" step="100" value="2000" style="width: 100%;">
+            </div>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="icon highway"></div>
+                    <span>Highway</span>
+                </div>
+                <div class="legend-item">
+                    <div class="icon street"></div>
+                    <span>Street</span>
+                </div>
+                <div class="legend-item">
+                    <div class="icon house"></div>
+                    <span>House</span>
+                </div>
+                <div class="legend-item">
+                    <div class="icon grass"></div>
+                    <span>Grass</span>
+                </div>
+                <div class="legend-item">
+                    <div class="icon car"></div>
+                    <span>Car</span>
+                </div>
+                <div class="legend-item">
+                    <div class="icon light"></div>
+                    <span>Traffic Light</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIG ---
+        const CELL_SIZE = 32;
+        const CellType = {
+            GRASS: 0,
+            ROAD: 1, // 1-cell wide
+            HIGHWAY: 5, // 2-cell wide (new)
+            HOUSE: 2,
+            WATER: 3,
+            TREE: 4
+        };
+
+        // --- GRID ---
+        class Grid {
+            constructor(width, height) {
+                this.width = width;
+                this.height = height;
+                this.cells = new Array(width * height).fill(CellType.GRASS);
+            }
+
+            getIndex(x, y) {
+                return y * this.width + x;
+            }
+
+            get(x, y) {
+                if (x < 0 || x >= this.width || y < 0 || y >= this.height) return null;
+                return this.cells[this.getIndex(x, y)];
+            }
+
+            set(x, y, type) {
+                if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+                this.cells[this.getIndex(x, y)] = type;
+            }
+
+            isRoad(x, y) {
+                const type = this.get(x, y);
+                return type === CellType.ROAD || type === CellType.HIGHWAY;
+            }
+
+            forEach(callback) {
+                for (let y = 0; y < this.height; y++) {
+                    for (let x = 0; x < this.width; x++) {
+                        callback(this.get(x, y), x, y);
+                    }
+                }
+            }
+        }
+
+        // --- TRAFFIC LIGHT ---
+        class TrafficLight {
+            constructor(x, y) {
+                this.x = x; // Grid coordinates (top-left of 2x2 intersection)
+                this.y = y;
+                this.isGreenNS = Math.random() < 0.5;
+                this.timer = 0;
+                this.duration = 2000;
+                this.manual = false;
+            }
+
+            toggle() {
+                this.manual = true;
+                this.isGreenNS = !this.isGreenNS;
+                this.timer = 0;
+            }
+
+            update(dt, duration) {
+                if (this.manual) return;
+
+                this.duration = duration;
+                this.timer += dt;
+                if (this.timer > this.duration) {
+                    this.timer = 0;
+                    this.isGreenNS = !this.isGreenNS;
+                }
+            }
+        }
+
+        // --- GENERATOR ---
+        class Generator {
+            generate(grid, lights) {
+                lights.length = 0;
+                grid.cells.fill(CellType.GRASS);
+
+                // 2. Main Roads (Highways - 2 cells wide)
+                const highwayWalkers = [];
+                for (let i = 0; i < 3; i++) {
+                    let sx = Math.floor(grid.width / 2);
+                    let sy = Math.floor(grid.height / 2);
+                    if (sx % 2 !== 0) sx--;
+                    if (sy % 2 !== 0) sy--;
+
+                    highwayWalkers.push({
+                        x: sx + (i * 20 - 20),
+                        y: sy,
+                        dir: Math.floor(Math.random() * 4),
+                        straightSteps: 0
+                    });
+                }
+
+                for (let i = 0; i < 200; i++) {
+                    highwayWalkers.forEach(w => {
+                        this.fillBrush(grid, w.x, w.y, 2, CellType.HIGHWAY);
+
+                        // Enforce minimum straightness for spacing
+                        if (w.straightSteps > 10 && Math.random() < 0.1) {
+                            w.dir = Math.floor(Math.random() * 4);
+                            w.straightSteps = 0;
+                        }
+
+                        const step = 2;
+                        if (w.dir === 0) w.y -= step;
+                        else if (w.dir === 1) w.x += step;
+                        else if (w.dir === 2) w.y += step;
+                        else if (w.dir === 3) w.x -= step;
+                        w.straightSteps += step;
+
+                        w.x = Math.max(2, Math.min(grid.width - 4, w.x));
+                        w.y = Math.max(2, Math.min(grid.height - 4, w.y));
+                        // Re-align to even grid
+                        if (w.x % 2 !== 0) w.x--;
+                        if (w.y % 2 !== 0) w.y--;
+                    });
+                }
+
+                // 3. Streets (1 cell wide)
+                const streetWalkers = [];
+                for (let i = 0; i < 20; i++) {
+                    let rx = Math.floor(Math.random() * (grid.width - 2)) + 1;
+                    let ry = Math.floor(Math.random() * (grid.height - 2)) + 1;
+                    if (this.hasNeighbor(grid, rx, ry, [CellType.HIGHWAY])) {
+                        streetWalkers.push({ x: rx, y: ry, dir: Math.floor(Math.random() * 4), steps: 0 });
+                    }
+                }
+
+                for (let i = 0; i < 400; i++) {
+                    // Filter dead walkers
+                    for (let k = streetWalkers.length - 1; k >= 0; k--) {
+                        const w = streetWalkers[k];
+
+                        // Anti-Parallel Rule
+                        if (grid.get(w.x, w.y) !== CellType.HIGHWAY && w.steps > 1) {
+                            if (this.hasNeighbor(grid, w.x, w.y, [CellType.HIGHWAY])) {
+                                streetWalkers.splice(k, 1);
+                                continue;
+                            }
+                        }
+
+                        if (grid.get(w.x, w.y) !== CellType.HIGHWAY) {
+                            grid.set(w.x, w.y, CellType.ROAD);
+                        }
+
+                        if (Math.random() < 0.2) w.dir = Math.floor(Math.random() * 4);
+
+                        if (w.dir === 0) w.y--;
+                        else if (w.dir === 1) w.x++;
+                        else if (w.dir === 2) w.y++;
+                        else if (w.dir === 3) w.x--;
+
+                        w.x = Math.max(1, Math.min(grid.width - 2, w.x));
+                        w.y = Math.max(1, Math.min(grid.height - 2, w.y));
+                        w.steps++;
+
+                        if (w.steps > 60) streetWalkers.splice(k, 1);
+                    }
+
+                    if (streetWalkers.length < 5 && Math.random() < 0.1) {
+                        let rx = Math.floor(Math.random() * (grid.width - 2)) + 1;
+                        let ry = Math.floor(Math.random() * (grid.height - 2)) + 1;
+                        if (this.hasNeighbor(grid, rx, ry, [CellType.HIGHWAY])) {
+                            streetWalkers.push({ x: rx, y: ry, dir: Math.floor(Math.random() * 4), steps: 0 });
+                        }
+                    }
+                }
+
+                // 4. Place Houses
+                for (let y = 0; y < grid.height; y++) {
+                    for (let x = 0; x < grid.width; x++) {
+                        if (grid.get(x, y) === CellType.GRASS) {
+                            if (this.hasNeighbor(grid, x, y, [CellType.ROAD, CellType.HIGHWAY])) {
+                                if (Math.random() < 0.4) {
+                                    grid.set(x, y, CellType.HOUSE);
+                                } else if (Math.random() < 0.1) {
+                                    grid.set(x, y, CellType.TREE);
+                                }
+                            } else if (Math.random() < 0.02) {
+                                grid.set(x, y, CellType.TREE);
+                            }
+                        }
+                    }
+                }
+
+                // 5. Detect Intersections
+                for (let y = 0; y < grid.height; y += 2) {
+                    for (let x = 0; x < grid.width; x += 2) {
+                        if (grid.get(x, y) === CellType.HIGHWAY &&
+                            grid.get(x + 1, y) === CellType.HIGHWAY &&
+                            grid.get(x, y + 1) === CellType.HIGHWAY &&
+                            grid.get(x + 1, y + 1) === CellType.HIGHWAY) {
+
+                            const hasNS = (grid.get(x, y - 1) === CellType.HIGHWAY || grid.get(x + 1, y - 1) === CellType.HIGHWAY) &&
+                                (grid.get(x, y + 2) === CellType.HIGHWAY || grid.get(x + 1, y + 2) === CellType.HIGHWAY);
+
+                            const hasEW = (grid.get(x - 1, y) === CellType.HIGHWAY || grid.get(x - 1, y + 1) === CellType.HIGHWAY) &&
+                                (grid.get(x + 2, y) === CellType.HIGHWAY || grid.get(x + 2, y + 1) === CellType.HIGHWAY);
+
+                            if (hasNS && hasEW) {
+                                // Check for existing lights nearby
+                                const tooClose = lights.some(l => (Math.abs(l.x - x) + Math.abs(l.y - y)) < 15);
+                                if (!tooClose) {
+                                    lights.push(new TrafficLight(x, y));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            fillBrush(grid, x, y, size, type) {
+                for (let by = 0; by < size; by++) {
+                    for (let bx = 0; bx < size; bx++) {
+                        grid.set(x + bx, y + by, type);
+                    }
+                }
+            }
+
+            hasNeighbor(grid, x, y, types) {
+                const neighbors = [
+                    grid.get(x + 1, y), grid.get(x - 1, y),
+                    grid.get(x, y + 1), grid.get(x, y - 1)
+                ];
+                return neighbors.some(n => types.includes(n));
+            }
+        }
+
+        // --- CARS ---
+        class Car {
+            constructor(grid, lights) {
+                this.grid = grid;
+                this.lights = lights;
+                this.x = 0;
+                this.y = 0;
+                this.dir = 0;
+                this.speed = 0.05 + Math.random() * 0.05;
+                this.color = `hsl(${Math.random() * 360}, 75%, 55%)`;
+                this.waiting = false;
+                this.findSpawn();
+
+                this.lastCellX = Math.floor(this.x);
+                this.lastCellY = Math.floor(this.y);
+            }
+
+            findSpawn() {
+                for (let i = 0; i < 100; i++) {
+                    const tx = Math.floor(Math.random() * this.grid.width);
+                    const ty = Math.floor(Math.random() * this.grid.height);
+                    if (this.grid.isRoad(tx, ty)) {
+                        this.x = tx + 0.5;
+                        this.y = ty + 0.5;
+                        this.pickDirection(tx, ty);
+                        return;
+                    }
+                }
+            }
+
+            // Left-Hand Traffic Logic
+            isCorrectLane(x, y, dir) {
+                if (this.grid.get(x, y) !== CellType.HIGHWAY) return true;
+                // N (0) -> Keep Left -> Left side is West -> Even X
+                if (dir === 0) return (x % 2 === 0);
+                // S (2) -> Keep Left -> Left side is East -> Odd X
+                if (dir === 2) return (x % 2 !== 0);
+                // E (1) -> Keep Left -> Left side is North -> Even Y
+                if (dir === 1) return (y % 2 === 0);
+                // W (3) -> Keep Left -> Left side is South -> Odd Y
+                if (dir === 3) return (y % 2 !== 0);
+                return true;
+            }
+
+            pickDirection(cx, cy) {
+                const validDirs = [];
+                if (this.grid.isRoad(cx, cy - 1)) validDirs.push(0);
+                if (this.grid.isRoad(cx + 1, cy)) validDirs.push(1);
+                if (this.grid.isRoad(cx, cy + 1)) validDirs.push(2);
+                if (this.grid.isRoad(cx - 1, cy)) validDirs.push(3);
+
+                if (validDirs.length === 0) {
+                    this.dir = (this.dir + 2) % 4;
+                    return;
+                }
+
+                // Logic:
+                // Intersection = > 2 ways (including back)
+                // Straight/Curve = 2 ways
+                // Dead End = 1 way
+
+                const reverse = (this.dir + 2) % 4;
+                let options = [];
+
+                if (validDirs.length > 2) {
+                    // Intersection: All valid directions are allowed (including U-turn if lane permits)
+                    // ...But typically we prefer valid forward options over reverse unless random chance?
+                    // Let's allow all, filter by lane.
+                    options = validDirs;
+                } else if (validDirs.length === 2) {
+                    // Straight/Curve: MUST NOT U-Turn.
+                    options = validDirs.filter(d => d !== reverse);
+                } else {
+                    // Dead End: Must U-Turn.
+                    options = validDirs;
+                }
+
+                // Filter valid lanes
+                let bestOptions = options.filter(d => {
+                    let nx = cx, ny = cy;
+                    if (d === 0) ny--;
+                    else if (d === 1) nx++;
+                    else if (d === 2) ny++;
+                    else if (d === 3) nx--;
+                    return this.isCorrectLane(nx, ny, d);
+                });
+
+                // Extra Rule for Highways:
+                // Don't turn perpendicular just to swap lanes or hit a wall.
+                // If I am on a Highway, and I want to turn 90 degrees...
+                // Make sure there is more road *after* the turn.
+                if (this.grid.get(cx, cy) === CellType.HIGHWAY) {
+                    bestOptions = bestOptions.filter(d => {
+                        // If turning (dir changed)
+                        if (d !== this.dir) {
+                            // Look 2 steps ahead
+                            let nx = cx, ny = cy;
+                            // Step 1
+                            if (d === 0) ny--;
+                            else if (d === 1) nx++;
+                            else if (d === 2) ny++;
+                            else if (d === 3) nx--;
+
+                            // Step 2
+                            if (d === 0) ny--;
+                            else if (d === 1) nx++;
+                            else if (d === 2) ny++;
+                            else if (d === 3) nx--;
+
+                            // If Step 2 is NOT road, then Step 1 was likely just the 'other lane' or a dead stub.
+                            // So block this turn.
+                            if (!this.grid.isRoad(nx, ny)) return false;
+                        }
+                        return true;
+                    });
+                }
+
+                if (bestOptions.length > 0) {
+                    // If multiple choices, pick random (Intersection behavior)
+                    // If one choice, pick it (Straight/Curve behavior)
+                    this.dir = bestOptions[Math.floor(Math.random() * bestOptions.length)];
+                } else {
+                    // If no valid lane options (blocked?), try any valid physical option
+                    const fallback = options.length > 0 ? options : validDirs;
+                    this.dir = fallback[Math.floor(Math.random() * fallback.length)];
+                }
+            }
+
+            checkTrafficLight() {
+                // 1. Am I already IN an intersection? If so, DO NOT STOP.
+                const cx = Math.floor(this.x);
+                const cy = Math.floor(this.y);
+
+                // Lights are at even coordinates (x,y) covering (x,x+1) and (y,y+1)
+                // Check if there is a light at my current location
+                const myLightX = cx % 2 === 0 ? cx : cx - 1;
+                const myLightY = cy % 2 === 0 ? cy : cy - 1;
+                const currentLight = this.lights.find(l => l.x === myLightX && l.y === myLightY);
+
+                if (currentLight) {
+                    // I am inside an intersection. Ignore lights and clear it.
+                    return false;
+                }
+
+                // 2. Check ahead for a light
+                const lookAhead = 0.8; // Slightly reduced to allow creeping up to line
+                let lx = this.x;
+                let ly = this.y;
+
+                if (this.dir === 0) ly -= lookAhead;
+                if (this.dir === 1) lx += lookAhead;
+                if (this.dir === 2) ly += lookAhead;
+                if (this.dir === 3) lx -= lookAhead;
+
+                const gridX = Math.floor(lx);
+                const gridY = Math.floor(ly);
+
+                const lightX = gridX % 2 === 0 ? gridX : gridX - 1;
+                const lightY = gridY % 2 === 0 ? gridY : gridY - 1;
+
+                const light = this.lights.find(l => l.x === lightX && l.y === lightY);
+
+                if (light) {
+                    if (this.dir === 0 || this.dir === 2) {
+                        if (!light.isGreenNS) return true;
+                    } else {
+                        if (light.isGreenNS) return true;
+                    }
+                }
+                return false;
+            }
+
+            update() {
+                if (this.checkTrafficLight()) {
+                    this.waiting = true;
+                    return;
+                }
+                this.waiting = false;
+
+                const dx = [0, 1, 0, -1];
+                const dy = [-1, 0, 1, 0];
+
+                const nextX = this.x + dx[this.dir] * this.speed;
+                const nextY = this.y + dy[this.dir] * this.speed;
+
+                // Collision Check
+                const ncx = Math.floor(nextX);
+                const ncy = Math.floor(nextY);
+
+                // If the target cell is NOT a road/highway, bounce.
+                // Allow wrapping (out of bounds is handled later, or treated as 'ok' to wrap)
+                if (ncx >= 0 && ncx < this.grid.width && ncy >= 0 && ncy < this.grid.height) {
+                    if (!this.grid.isRoad(ncx, ncy)) {
+                        this.dir = (this.dir + 2) % 4; // Reverse
+                        return;
+                    }
+                }
+
+                this.x = nextX;
+                this.y = nextY;
+
+                const cx = Math.floor(this.x);
+                const cy = Math.floor(this.y);
+
+                if (cx !== this.lastCellX || cy !== this.lastCellY) {
+                    const centerX = cx + 0.5;
+                    const centerY = cy + 0.5;
+                    const dist = Math.abs(this.x - centerX) + Math.abs(this.y - centerY);
+
+                    if (dist < this.speed * 1.5) {
+                        this.pickDirection(cx, cy);
+                        this.lastCellX = cx;
+                        this.lastCellY = cy;
+                    }
+                }
+
+                // Wrap
+                if (this.x < 0) this.x = this.grid.width - 1;
+                else if (this.x >= this.grid.width) this.x = 0;
+
+                if (this.y < 0) this.y = this.grid.height - 1;
+                else if (this.y >= this.grid.height) this.y = 0;
+            }
+        }
+
+        // --- RENDERER ---
+        class Renderer {
+            constructor(canvas) {
+                this.ctx = canvas.getContext('2d');
+                this.canvas = canvas;
+            }
+
+            draw(grid, cars, lights) {
+                this.ctx.fillStyle = '#10b981'; // Background Grass
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                const totalWidth = grid.width * CELL_SIZE;
+                const totalHeight = grid.height * CELL_SIZE;
+                const offsetX = Math.floor((this.canvas.width - totalWidth) / 2);
+                const offsetY = Math.floor((this.canvas.height - totalHeight) / 2);
+
+                grid.forEach((value, x, y) => {
+                    const posX = offsetX + x * CELL_SIZE;
+                    const posY = offsetY + y * CELL_SIZE;
+                    if (posX < -CELL_SIZE || posY < -CELL_SIZE ||
+                        posX > this.canvas.width || posY > this.canvas.height) return;
+
+                    if (value === CellType.ROAD) {
+                        this.ctx.fillStyle = '#9ca3af';
+                        this.ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
+                    } else if (value === CellType.HIGHWAY) {
+                        this.ctx.fillStyle = '#4b5563';
+                        this.ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
+                        this.ctx.fillStyle = '#fcd34d';
+                        this.ctx.fillRect(posX + CELL_SIZE / 2 - 1, posY + CELL_SIZE / 2 - 1, 2, 2);
+                    } else if (value === CellType.HOUSE) {
+                        this.ctx.fillStyle = '#059669';
+                        this.ctx.fillRect(posX, posY, CELL_SIZE, CELL_SIZE);
+                        this.ctx.fillStyle = '#ef4444';
+                        const houseSize = CELL_SIZE - 8;
+                        this.ctx.fillRect(posX + 4, posY + 8, houseSize, houseSize - 4);
+                        this.ctx.fillStyle = '#b91c1c';
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(posX + 2, posY + 8);
+                        this.ctx.lineTo(posX + CELL_SIZE / 2, posY);
+                        this.ctx.lineTo(posX + CELL_SIZE - 2, posY + 8);
+                        this.ctx.fill();
+                    } else if (value === CellType.TREE) {
+                        this.ctx.fillStyle = '#047857';
+                        this.ctx.beginPath();
+                        this.ctx.arc(posX + CELL_SIZE / 2, posY + CELL_SIZE / 2, CELL_SIZE / 3, 0, Math.PI * 2);
+                        this.ctx.fill();
+                    }
+                });
+
+                lights.forEach(l => {
+                    const centerX = offsetX + (l.x + 1) * CELL_SIZE;
+                    const centerY = offsetY + (l.y + 1) * CELL_SIZE;
+
+                    this.ctx.fillStyle = '#000';
+                    this.ctx.fillRect(centerX - 10, centerY - 10, 20, 20);
+
+                    this.ctx.fillStyle = l.isGreenNS ? '#0f0' : '#f00';
+                    this.ctx.beginPath();
+                    this.ctx.arc(centerX, centerY - 5, 3, 0, Math.PI * 2);
+                    this.ctx.arc(centerX, centerY + 5, 3, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    this.ctx.fillStyle = !l.isGreenNS ? '#0f0' : '#f00';
+                    this.ctx.beginPath();
+                    this.ctx.arc(centerX - 5, centerY, 3, 0, Math.PI * 2);
+                    this.ctx.arc(centerX + 5, centerY, 3, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    if (l.manual) {
+                        this.ctx.strokeStyle = '#fff';
+                        this.ctx.lineWidth = 1;
+                        this.ctx.strokeRect(centerX - 11, centerY - 11, 22, 22);
+                    }
+                });
+
+                cars.forEach(car => {
+                    const screenX = offsetX + car.x * CELL_SIZE;
+                    const screenY = offsetY + car.y * CELL_SIZE;
+
+                    this.ctx.fillStyle = car.color;
+                    this.ctx.save();
+                    this.ctx.translate(screenX, screenY);
+
+                    if (car.dir === 1) this.ctx.rotate(Math.PI / 2);
+                    if (car.dir === 2) this.ctx.rotate(Math.PI);
+                    if (car.dir === 3) this.ctx.rotate(-Math.PI / 2);
+
+                    this.ctx.fillRect(-6, -10, 12, 20);
+                    this.ctx.fillStyle = '#bfdbfe';
+                    this.ctx.fillRect(-5, -5, 10, 5);
+
+                    if (car.waiting) {
+                        this.ctx.fillStyle = '#f00';
+                        this.ctx.fillRect(-5, 8, 3, 2);
+                        this.ctx.fillRect(2, 8, 3, 2);
+                    }
+
+                    this.ctx.restore();
+                });
+            }
+        }
+
+        // --- GAME ---
+        class CityGame {
+            constructor() {
+                this.canvas = document.getElementById('city-canvas');
+                this.grid = new Grid(60, 44);
+                this.renderer = new Renderer(this.canvas);
+                this.generator = new Generator();
+                this.cars = [];
+                this.lights = [];
+                this.lightDuration = 2000;
+
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+
+                // Manual Control
+                this.canvas.addEventListener('mousedown', (e) => {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    const clickY = e.clientY - rect.top;
+
+                    const totalWidth = this.grid.width * CELL_SIZE;
+                    const totalHeight = this.grid.height * CELL_SIZE;
+                    const offsetX = Math.floor((this.canvas.width - totalWidth) / 2);
+                    const offsetY = Math.floor((this.canvas.height - totalHeight) / 2);
+
+                    // Convert screen to grid
+                    const gx = Math.floor((clickX - offsetX) / CELL_SIZE);
+                    const gy = Math.floor((clickY - offsetY) / CELL_SIZE);
+
+                    // Lights are at even coordinates
+                    // Check if we clicked on or near a light
+                    // A light at X,Y covers X,Y to X+1,Y+1.
+                    const lx = gx % 2 === 0 ? gx : gx - 1;
+                    const ly = gy % 2 === 0 ? gy : gy - 1;
+
+                    const light = this.lights.find(l => l.x === lx && l.y === ly);
+                    if (light) {
+                        light.toggle();
+                    }
+                });
+
+                this.lastTime = 0;
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+            }
+
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            start() {
+                this.regenerate();
+            }
+
+            regenerate() {
+                this.generator.generate(this.grid, this.lights);
+                this.spawnCars(60);
+            }
+
+            spawnCars(count) {
+                this.cars = [];
+                for (let i = 0; i < count; i++) {
+                    const car = new Car(this.grid, this.lights);
+                    this.cars.push(car);
+                }
+            }
+
+            setLightDuration(val) {
+                this.lightDuration = val;
+            }
+
+            animate(timestamp) {
+                const dt = timestamp - this.lastTime;
+                this.lastTime = timestamp;
+
+                const safeDt = Math.min(dt, 100);
+
+                this.lights.forEach(l => l.update(safeDt, this.lightDuration));
+                this.cars.forEach(car => car.update());
+                this.draw();
+                requestAnimationFrame(this.animate);
+            }
+
+            draw() {
+                this.renderer.draw(this.grid, this.cars, this.lights);
+            }
+        }
+
+        // --- INIT ---
+        const game = new CityGame();
+        game.start();
+
+        document.getElementById('regen-btn').addEventListener('click', () => {
+            game.regenerate();
+        });
+
+        const slider = document.getElementById('light-slider');
+        const label = document.getElementById('light-label');
+        slider.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            label.textContent = (val / 1000).toFixed(1) + 's';
+            game.setLightDuration(val);
+        });
+
+    </script>
+</body>
+
+</html>
