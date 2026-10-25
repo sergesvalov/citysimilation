@@ -1,0 +1,5 @@
+{
+  "appId": "com.citysim.app",
+  "appName": "City Simulator",
+  "webDir": "dist"
+}
